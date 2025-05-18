@@ -6,6 +6,8 @@ import time
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
+import re
+from typing import Dict, List
 from datetime import datetime, timedelta
 
 # Page configuration
@@ -123,6 +125,110 @@ def check_device_status():
             return "Offline"
     except:
         return "Offline"
+    
+def user_prompt_build(user_input,data):
+    """Process user input for Gemini AI."""
+    # Here you can add any processing logic for the user input
+    prompt = f"""
+Contexto del usuario, esto es lo prioritario por encima de los sensores:
+{user_input}
+ 
+Especificaciones de los sensores:
+Los siguientes datos son información de sensores de una intersección de calles en una ciudad.
+SENSOR_LIGHT_LEFT: sensor de luz
+SENSOR_LIGHT_RIGHT: sensor de luz
+SENSOR_CO2: Calidad del aire
+SENSOR_CNY1: sensor de cantidad de carros de la primera calle
+SENSOR_CNY2: sensor de cantidad de carros de la primera calle
+SENSOR_CNY3: sensor de cantidad de carros de la primera calle
+SENSOR_CNY4: sensor de cantidad de carros de la segunda calle
+SENSOR_CNY5: sensor de cantidad de carros de la segunda calle
+SENSOR_CNY6: sensor de cantidad de carros de la segunda calle
+SENSOR_P1, SENSOR_P2: no tener en cuenta
+ 
+Reglas:
+- Si los sensores de luz presentan valores por debajo de 1000, está de noche.
+- Si el valor de los sensores de cantidad de carros, están en 1, significa que no hay carros.
+- Es prioridad las ordenes del usuario, emergencia es un 1.
+- Puedes hacerle sugerencias al usuario, pero si pide alguna condición de emergencia, se debe cumplir.
+ 
+Datos de sensores:
+{data}
+ 
+Objetivo:
+Solo puedes accionar el estado de los semáforos (normal o emergencia).
+Genera conclusiones accionables basadas en lo anterior, en idioma español.
+ 
+Formato de salida estricto (sin texto adicional, sólo JSON válido):
+Ejemplo de JSON literal: "respuesta": "tu texto en max. 3 líneas", "emergencia": 0 (si no hay emergencia) o 1 (si hay emergencia)
+ 
+"""
+    return prompt
+    
+def parse_gemini_response(response) -> dict:
+    """
+    Dada una respuesta GenerateContentResponse de Gemini, extrae el JSON
+    y lo convierte en un dict. Si no encuentra un JSON válido,
+    devuelve un fallback con el texto completo.
+    """
+    try:
+        # 1) Navega hasta el texto bruto en el primer candidato y parte
+        raw_text = response.result.candidates[0].content.parts[0].text
+        # 2) Si viene precedido de un prefijo como "json\n", elimínalo
+        #    (puede variar: "JSON\n", "json\n", etc.)
+        if raw_text.lower().startswith("json"):
+            # separa en la primera línea y toma todo lo que viene después
+            _, raw_text = raw_text.split('\n', 1)
+        # 3) Carga el JSON
+        return json.loads(raw_text)
+    except Exception:
+        # Fallback: devuelve la respuesta sin procesar
+        return {
+            "respuesta": raw_text.strip() if 'raw_text' in locals() else str(response),
+            "emergencia": 0
+        } 
+    
+def extract_fields(text: str) -> Dict[str, object]:
+
+    """
+
+    Busca en la cadena text los valores de "respuesta" y "emergencia"
+
+    y los devuelve en un dict.
+
+    Si no encuentra alguno, devuelve "" para respuesta y 0 para emergencia.
+
+    """
+
+    # Regex para extraer el valor de "respuesta" (entre comillas)
+
+    resp_match = re.search(
+
+        r'"respuesta"\s*:\s*"(?P<resp>.*?)"',
+
+        text,
+
+        re.DOTALL
+
+    )
+
+    # Regex para extraer el valor numérico de "emergencia"
+
+    emer_match = re.search(
+
+        r'"emergencia"\s*:\s*(?P<emer>\d+)',
+
+        text
+
+    )
+ 
+    respuesta = resp_match.group("resp") if resp_match else ""
+
+    emergencia = int(emer_match.group("emer")) if emer_match else 0
+ 
+    return {"respuesta": respuesta, "emergencia": emergencia}
+ 
+
 
 # Create tabs
 tab1, tab2, tab3, tab4 = st.tabs(["📊 Device Dashboard", "🔧 Manual Control", "🤖 Gemini AI", "📈 Data Analytics"])
@@ -391,8 +497,12 @@ with tab3:
             if st.button("🚀 Analyze with Gemini", type="primary"):
                 if user_prompt:
                     try:
-                        model = genai.GenerativeModel('gemini-pro')
+                        sensor_data_obtenaid = get_sensor()
+
+                        model = genai.GenerativeModel('gemini-2.0-flash')
                         
+                        user_prompt = user_prompt_build(user_prompt, sensor_data_obtenaid)
+                   
                         with st.spinner("Analyzing with Gemini AI..."):
                             response = model.generate_content(
                                 user_prompt,
@@ -404,7 +514,26 @@ with tab3:
                         
                         if response.text:
                             st.success("✅ Analysis complete!")
-                            st.markdown(response.text)
+                            #response_json = json.loads(response.text)
+                            #json_response = response.to_dict()
+
+                            #json_response=json.load(response.text)
+                            #response1 = response.text
+
+                            #json_response = parse_gemini_response(response)
+
+                            #response_clean=response.text.strip()
+                            #response_json = json.load(response_clean)
+
+                            response_json=extract_fields(response.text)
+                            st.markdown(response_json.get('respuesta')) 
+
+                            set_actuator(int(response_json.get('emergencia')))
+
+                            #st.markdown(response_json.get('respuesta'))
+
+
+                            # Check for emergency condition
                             
                             # Save conversation
                             st.session_state.gemini_conversations.append({
