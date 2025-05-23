@@ -1,12 +1,13 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
+#include <LiquidCrystal_I2C.h>
+#include <HTTPClient.h>
  
 // ——— Configuración Wi-Fi —————————————————————————————————
-const char* ssid     = "WIFI";
-const char* password = "PASSWORD";
+const char* ssid     = "RED";
+const char* password = "PASS"; 
  
-
 
 // ——— Pines de sensores ————————————————————
 #define SENSOR_LIGHT_LEFT    12  
@@ -59,6 +60,16 @@ unsigned long tini, tact, trel;
 bool vR1,vA1,vV1,vR2,vA2,vV2 = 0;
 int estado = 0;
 int p = 0;
+// Variables Clima
+const String lat = "6.2001218";
+const String lon = "-75.5806761";
+float lluvia = 0, viento = 0;
+unsigned long tiempoCambio = 0;
+unsigned long tiempoAnteriorClima = 0;
+const long intervaloClima = 60000;
+
+// LCD
+LiquidCrystal_I2C lcd(0x27, 16, 2);
  
 // ——— Funciones de manejo de rutas —————————————————————
  
@@ -89,6 +100,8 @@ void handleGetSensor() {
   doc["SENSOR_CNY6"] = actual_SENSOR_CNY6;
   doc["SENSOR_P1"] = actual_SENSOR_P1;
   doc["SENSOR_P2"] = actual_SENSOR_P2;
+  doc["WIND_SPEED"] = viento;
+  doc["PRECIPITATION"] = lluvia;
  
   String out;
   serializeJson(doc, out);
@@ -124,6 +137,7 @@ void handlePostActuator() {
   resp["status"] = actuatorState;
   String out;
   serializeJson(resp, out);
+  actualizarPantalla(actuatorState);
   server.send(200, "application/json", out);
 }
  
@@ -159,6 +173,10 @@ void setup(){
   digitalWrite(LED_2_RED, LOW);
   digitalWrite(LED_2_YELLOW, LOW);
   digitalWrite(LED_2_GREEEN, LOW);
+
+  lcd.init(); lcd.backlight(); lcd.clear();
+  lcd.print("***ESTADO NORMAL***");
+
  
   tini = millis(); // Iniciamos la marca de tiempo
  
@@ -187,6 +205,8 @@ void loop(){
   server.handleClient();
  
   actuatorStateCases(actuatorState);
+  //sendSensorData();
+  getWeather();
  
 }
  
@@ -316,4 +336,71 @@ void actuatorStateCases(int mode) {
   digitalWrite(LED_2_YELLOW,vA2);
   digitalWrite(LED_2_GREEEN,vV2);
  
+} 
+
+
+// Actualizar pantalla
+void actualizarPantalla(int mode){
+  lcd.clear();
+  switch(mode){
+    case 0 : lcd.print("***ESTADO NORMAL***");
+             Serial.println("ESTADO NORMAL");
+             break;
+    case 1 : lcd.print("*ESTADO EMERGENCIA*");
+             Serial.println("ESTADO EMERGENCIA");
+             break;
+  }
+}
+
+
+void sendSensorData(){
+  HTTPClient http;
+  http.begin("http://192.168.1.2:5002/sensor/data"); // IP de tu PC
+  http.addHeader("Content-Type", "application/json");
+  
+  // Crear JSON con datos de sensores
+  StaticJsonDocument<200> doc;
+  doc["temperature"] = 25.5;
+  doc["humidity"] = 60.2;
+  doc["pressure"] = 1013.25;
+  doc["sensor_id"] = "ESP32_001";
+  
+  String jsonString;
+  serializeJson(doc, jsonString);
+  
+  int httpResponseCode = http.POST(jsonString);
+  
+  if (httpResponseCode > 0) {
+    String response = http.getString();
+    Serial.println("Response: " + response);
+  }
+  Serial.println("Comunicación de envio");
+  http.end();
+  delay(5000);
+}
+
+void getWeather(){
+
+
+  if (millis() - tiempoAnteriorClima > intervaloClima) {
+    tiempoAnteriorClima = millis();
+    
+    if (WiFi.status() == WL_CONNECTED) {
+      HTTPClient http;
+      String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat +
+                   "&longitude=" + lon + "&current=wind_speed_10m,precipitation";
+
+      http.begin(url);
+      if (http.GET() == 200) {
+        String res = http.getString();
+        StaticJsonDocument<1024> doc;
+        if (!deserializeJson(doc, res)) {
+          viento = doc["current"]["wind_speed_10m"];
+          lluvia = doc["current"]["precipitation"];
+        }
+        Serial.println("clima: "+res);
+      }
+      http.end();
+    }
+  }
 } 
