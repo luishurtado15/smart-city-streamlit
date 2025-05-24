@@ -151,7 +151,9 @@ Reglas:
 - Si el valor de los sensores de cantidad de carros, están en 1, significa que no hay carros.
 - Es prioridad las ordenes del usuario, emergencia es un 1.
 - Puedes hacerle sugerencias al usuario, pero si pide alguna condición de emergencia, se debe cumplir.
- 
+- Si los sensores SENSOR_CNY1, SENSOR_CNY2, SENSOR_CNY3 están en 0 los tres, hay mucho tráfico en la calle 1.
+- Si los sensores SENSOR_CNY4, SENSOR_CNY5, SENSOR_CNY6 están en 0 los tres, hay mucho tráfico en la calle 2.
+
 Datos de sensores:
 {data}
  
@@ -514,23 +516,12 @@ with tab3:
                         
                         if response.text:
                             st.success("✅ Analysis complete!")
-                            #response_json = json.loads(response.text)
-                            #json_response = response.to_dict()
 
-                            #json_response=json.load(response.text)
-                            #response1 = response.text
-
-                            #json_response = parse_gemini_response(response)
-
-                            #response_clean=response.text.strip()
-                            #response_json = json.load(response_clean)
 
                             response_json=extract_fields(response.text)
                             st.markdown(response_json.get('respuesta')) 
 
                             set_actuator(int(response_json.get('emergencia')))
-
-                            #st.markdown(response_json.get('respuesta'))
 
 
                             # Check for emergency condition
